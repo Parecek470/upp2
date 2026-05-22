@@ -105,9 +105,12 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
             // Root-relative: use same scheme and domain as base
             absUrl = baseScheme + "://" + baseDomain + href;
         } else {
-            // Relative path — skip
-            pos += 3;
-            continue;
+            // Relative path: resolve against base URL's directory
+            // e.g. base="http://example.com/foo/bar", href="baz.html" -> "http://example.com/foo/baz.html"
+            std::string basePath = baseParts.path;
+            size_t lastSlash = basePath.rfind('/');
+            std::string baseDir = (lastSlash != std::string::npos) ? basePath.substr(0, lastSlash + 1) : "/";
+            absUrl = baseScheme + "://" + baseDomain + baseDir + href;
         }
 
         // Accept links that belong to the same domain regardless of scheme.
