@@ -140,12 +140,14 @@ void writeMapFile(const std::string& filepath, const CrawlResults& results) {
     for (const auto& [url, data] : results.pages)
         file << '"' << toRelativePath(url, base) << '"' << "\n";
 
-    // Section 2: edge pairs, quoted
-    for (const auto& [source, target] : results.edges)
+    // Section 2: edge pairs, quoted — skip self-loops
+    for (const auto& [source, target] : results.edges) {
+        if (source == target) continue;
         file << '"' << toRelativePath(source, base) << '"'
              << ' '
              << '"' << toRelativePath(target, base) << '"'
              << "\n";
+    }
 
     file.close();
 }
