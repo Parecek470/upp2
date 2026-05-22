@@ -48,15 +48,16 @@ void runWorkerB(int rank, int N, int M) {
 
         int imgCount  = countTag(html, "<img ");
         int formCount = countTag(html, "<form ");
-        std::vector<std::string> links    = extractLinks(html, url);
+        int linkCount = countTag(html, "<a ");   // total <a> tags, regardless of domain
+        std::vector<std::string> links    = extractLinks(html, url);  // domain-filtered, for graph
         std::vector<std::string> headings = extractHeadings(html);
 
         // Serialize result
         std::string result;
         result += "URL:"    + url + "\n";
-        result += "IMAGES:" + std::to_string(imgCount)      + "\n";
-        result += "LINKS:"  + std::to_string(links.size())  + "\n";
-        result += "FORMS:"  + std::to_string(formCount)     + "\n";
+        result += "IMAGES:" + std::to_string(imgCount)   + "\n";
+        result += "LINKS:"  + std::to_string(linkCount)  + "\n";  // all links, not just same-domain
+        result += "FORMS:"  + std::to_string(formCount)  + "\n";
 
         for (const auto& link : links)
             result += "LINK:" + link + "\n";
