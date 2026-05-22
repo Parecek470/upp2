@@ -161,7 +161,7 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
 }
 
 
-// Strip all HTML tags from a string (e.g. heading text may contain <span>, <br>, etc.)
+// Strip all HTML tags from a string and trim whitespace
 static std::string stripTags(const std::string& s) {
     std::string out;
     bool inTag = false;
@@ -176,6 +176,7 @@ static std::string stripTags(const std::string& s) {
     return out.substr(start, end - start + 1);
 }
 
+// Extract headings (h1-h6) from HTML, prefixing them with - according to level and stripping tags inside headings.
 std::vector<std::string> extractHeadings(const std::string& html) {
     std::vector<std::string> headings;
     size_t pos = 0;
@@ -202,7 +203,6 @@ std::vector<std::string> extractHeadings(const std::string& html) {
 
         if (nextPos == std::string::npos) break; // No more headings
 
-        // Find the '>' that closes the opening tag (may have attributes)
         size_t tagClose = html.find('>', nextPos);
         if (tagClose == std::string::npos) break;
 
@@ -212,7 +212,7 @@ std::vector<std::string> extractHeadings(const std::string& html) {
 
         if (closePos != std::string::npos) {
             std::string raw  = html.substr(textStart, closePos - textStart);
-            std::string text = stripTags(raw);  // remove any inline tags like <span>
+            std::string text = stripTags(raw);  
             std::string prefix(foundLevel, '-');
             if (!text.empty())
                 headings.push_back(prefix + " " + text);

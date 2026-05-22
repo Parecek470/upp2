@@ -90,7 +90,6 @@ static std::string safeRecv(int source, int tag, int myRank) {
 
     std::vector<char> buf(static_cast<size_t>(n));
     MPI_Recv(buf.data(), n, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    // buf[n-1] == '\0' because sender sent size()+1
     return std::string(buf.data(), static_cast<size_t>(n) - 1);
 }
 
@@ -114,13 +113,13 @@ void runWorkerA_job(int rank, int N, int M) {
         return;
     }
 
-    std::set<std::string>    visitedUrls;
-    std::queue<std::string>  workQueue;
+    std::set<std::string> visitedUrls;
+    std::queue<std::string> workQueue;
     std::map<std::string, WorkerAPageData> pageResults;
     std::set<std::pair<std::string, std::string>> linkGraph;
-    std::queue<int>          idleWorkers;
-    int                      activeWorkers = 0;
-    int                      doneCount = 0;
+    std::queue<int> idleWorkers;
+    int activeWorkers = 0;
+    int doneCount = 0;
 
     workQueue.push(baseUrl);
 
