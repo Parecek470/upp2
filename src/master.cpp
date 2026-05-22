@@ -117,9 +117,9 @@ void createDirectory(const std::string& path) {
 // e.g. baseUrl="http://upp-test-1.martinubl.cz", url="http://upp-test-1.martinubl.cz/galerie" -> "/galerie"
 // If url equals baseUrl (with or without trailing slash) the path is "/".
 static std::string toRelativePath(const std::string& url, const std::string& baseUrl) {
-    // Strip trailing slash from baseUrl for consistent prefix matching
+    // Strip trailing slash and whitespace/\r from baseUrl for consistent prefix matching
     std::string base = baseUrl;
-    if (!base.empty() && base.back() == '/')
+    while (!base.empty() && (base.back() == '/' || base.back() == '\r' || base.back() == '\n' || base.back() == ' '))
         base.pop_back();
 
     if (url == base || url == base + "/")
