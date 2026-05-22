@@ -29,8 +29,11 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
     std::string startTime = getCurrentTimestamp();
     std::ostringstream outputHtml;
     outputHtml << "<h2>Crawling Results</h2>";
-    
-    
+
+    // --- Wake up all workers for this request (tag 1 = control channel) ---
+    for (int w = 1; w < 1 + g_N + g_N * g_M; w++)
+        MPI_Send("WORK", 5, MPI_CHAR, w, 1, MPI_COMM_WORLD);
+
     // Distribute URLs to Worker A nodes (round-robin)
     for (size_t i = 0; i < URLs.size(); i++) {
         int workerARank = 1 + (i % g_N);
@@ -137,6 +140,10 @@ int main(int argc, char** argv) {
 		svr.RegisterFormCallback(process);
 
 		svr.Run();
+
+		// Server stopped — tell all workers to shut down (tag 1 = control channel)
+		for (int w = 1; w < 1 + g_N + g_N * g_M; w++)
+			MPI_Send("SHUTDOWN", 9, MPI_CHAR, w, 1, MPI_COMM_WORLD);
 
 	} else if (rank >= 1 && rank <= g_N) {
 		runWorkerA(rank, g_N, g_M);
