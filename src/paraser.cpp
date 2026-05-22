@@ -49,84 +49,150 @@ int countTag(const std::string& html, const std::string& tag) {
 std::vector<std::string> extractLinks(const std::string& html, const std::string& baseUrl) {
     std::vector<std::string> links;
     size_t pos = 0;
-    
+
+    // Parse the base URL once to get scheme + domain for relative-URL resolution
+    // and for domain-matching against discovered links.
+    URLParts baseParts = parseURL(baseUrl);
+    // Canonical base prefix used for domain-matching: scheme://domain
+    // We compare against both http and https variants of the same domain so a
+    // page downloaded via https but submitted as http still matches.
+    std::string baseScheme = baseParts.scheme;          // "http" or "https"
+    std::string baseDomain = baseParts.domain;          // e.g. "upp-test-2.martinubl.cz"
+
     while ((pos = html.find("<a ", pos)) != std::string::npos) {
-        size_t closingTag = html.find(">", pos);
+        size_t closingTag = html.find('>', pos);
         if (closingTag == std::string::npos) break;
-        
-        size_t hrefStart = html.find("href=\"", pos);
-        if (hrefStart != std::string::npos && hrefStart < closingTag) {
-            hrefStart += 6; // Move past 'href="'
-            size_t hrefEnd = html.find("\"", hrefStart);
-            if (hrefEnd != std::string::npos && hrefEnd < closingTag) {
-                std::string href = html.substr(hrefStart, hrefEnd - hrefStart);
-                
-                // Convert relative to absolute
-                std::string absUrl;
-                if (href.find("://") != std::string::npos) {
-                    // Already absolute
-                    absUrl = href;
-                } else if (href[0] == '/') {
-                    // Root-relative: prepend scheme + domain
-                    URLParts base = parseURL(baseUrl);
-                    absUrl = base.scheme + "://" + base.domain + href;
-                } else {
-                    // Skip relative paths
-                    pos += 3;
-                    continue;
-                }
-                
-                // Check if it starts with baseUrl
-                if (absUrl.find(baseUrl) == 0) {
-                    links.push_back(absUrl);
-                }
-            }
+
+        // Find "href" attribute within this tag
+        size_t hrefPos = html.find("href", pos);
+        if (hrefPos == std::string::npos || hrefPos >= closingTag) {
+            pos += 3;
+            continue;
         }
-        
+
+        // Step over "href" and optional whitespace, then '=', then opening quote
+        size_t eq = html.find('=', hrefPos);
+        if (eq == std::string::npos || eq >= closingTag) {
+            pos += 3;
+            continue;
+        }
+        size_t quoteOpen = eq + 1;
+        if (quoteOpen >= closingTag || html[quoteOpen] != '"') {
+            pos += 3;
+            continue;
+        }
+        size_t hrefStart = quoteOpen + 1;
+        size_t hrefEnd   = html.find('"', hrefStart);
+        if (hrefEnd == std::string::npos || hrefEnd > closingTag) {
+            pos += 3;
+            continue;
+        }
+
+        std::string href = html.substr(hrefStart, hrefEnd - hrefStart);
+
+        // Skip empty, anchor-only, javascript:, mailto: etc.
+        if (href.empty() || href[0] == '#' ||
+            href.find("javascript:") == 0 || href.find("mailto:") == 0) {
+            pos += 3;
+            continue;
+        }
+
+        // Convert to absolute URL
+        std::string absUrl;
+        if (href.find("://") != std::string::npos) {
+            absUrl = href;
+        } else if (!href.empty() && href[0] == '/') {
+            // Root-relative: use same scheme and domain as base
+            absUrl = baseScheme + "://" + baseDomain + href;
+        } else {
+            // Relative path — skip
+            pos += 3;
+            continue;
+        }
+
+        // Accept links that belong to the same domain regardless of scheme
+        URLParts linkParts = parseURL(absUrl);
+        if (linkParts.domain == baseDomain) {
+            // Strip fragment (#...) from the path
+            std::string cleanUrl = linkParts.scheme + "://" + linkParts.domain + linkParts.path;
+            size_t fragPos = cleanUrl.find('#');
+            if (fragPos != std::string::npos)
+                cleanUrl = cleanUrl.substr(0, fragPos);
+            links.push_back(cleanUrl);
+        }
+
         pos += 3;
     }
-    
+
     return links;
 }
 
 
+// Strip all HTML tags from a string (e.g. heading text may contain <span>, <br>, etc.)
+static std::string stripTags(const std::string& s) {
+    std::string out;
+    bool inTag = false;
+    for (char c : s) {
+        if (c == '<')      inTag = true;
+        else if (c == '>') inTag = false;
+        else if (!inTag)   out += c;
+    }
+    // Trim leading/trailing whitespace
+    size_t start = out.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = out.find_last_not_of(" \t\r\n");
+    return out.substr(start, end - start + 1);
+}
+
 std::vector<std::string> extractHeadings(const std::string& html) {
     std::vector<std::string> headings;
     size_t pos = 0;
-    
+
     while (pos < html.size()) {
-        // Find next heading of any level
-        size_t nextPos = std::string::npos;
-        int foundLevel = 0;
-        
-        // Check which heading comes first
+        // Find whichever heading level appears next
+        size_t nextPos   = std::string::npos;
+        int    foundLevel = 0;
+
         for (int level = 1; level <= 6; ++level) {
-            std::string openTag = "<h" + std::to_string(level) + ">";
-            size_t found = html.find(openTag, pos);
-            if (found != std::string::npos && (nextPos == std::string::npos || found < nextPos)) {
-                nextPos = found;
-                foundLevel = level;
+            // Match <h1> or <h1 ...> — i.e. '<h' + digit followed by '>' or ' '
+            std::string prefix = "<h" + std::to_string(level);
+            size_t found = html.find(prefix, pos);
+            while (found != std::string::npos) {
+                // Make sure the character right after 'h<digit>' is '>' or whitespace
+                size_t after = found + prefix.size();
+                if (after < html.size() && (html[after] == '>' || html[after] == ' ' || html[after] == '\t' || html[after] == '\n' || html[after] == '\r')) {
+                    if (nextPos == std::string::npos || found < nextPos) {
+                        nextPos    = found;
+                        foundLevel = level;
+                    }
+                    break;
+                }
+                // Could be e.g. <h10> — keep searching
+                found = html.find(prefix, found + 1);
             }
         }
-        
+
         if (nextPos == std::string::npos) break; // No more headings
-        
-        // Extract this heading
-        std::string openTag = "<h" + std::to_string(foundLevel) + ">";
+
+        // Find the '>' that closes the opening tag (may have attributes)
+        size_t tagClose = html.find('>', nextPos);
+        if (tagClose == std::string::npos) break;
+
         std::string closeTag = "</h" + std::to_string(foundLevel) + ">";
-        
-        size_t textStart = nextPos + openTag.length();
-        size_t closePos = html.find(closeTag, textStart);
-        
+        size_t textStart = tagClose + 1;
+        size_t closePos  = html.find(closeTag, textStart);
+
         if (closePos != std::string::npos) {
-            std::string text = html.substr(textStart, closePos - textStart);
+            std::string raw  = html.substr(textStart, closePos - textStart);
+            std::string text = stripTags(raw);  // remove any inline tags like <span>
             std::string prefix(foundLevel, '-');
-            headings.push_back(prefix + " " + text);
-            pos = closePos + closeTag.length();
+            if (!text.empty())
+                headings.push_back(prefix + " " + text);
+            pos = closePos + closeTag.size();
         } else {
             break;
         }
     }
-    
+
     return headings;
 }
