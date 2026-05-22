@@ -110,11 +110,13 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
             continue;
         }
 
-        // Accept links that belong to the same domain regardless of scheme
+        // Accept links that belong to the same domain regardless of scheme.
+        // Normalize to baseScheme so all URLs in the graph are consistent
+        // (avoids scheme mismatch in visitedUrls, toRelativePath, and downloadHTML).
         URLParts linkParts = parseURL(absUrl);
         if (linkParts.domain == baseDomain) {
-            // Strip fragment (#...) from the path
-            std::string cleanUrl = linkParts.scheme + "://" + linkParts.domain + linkParts.path;
+            // Use baseScheme, not linkParts.scheme, so http/https mismatches don't fragment the graph
+            std::string cleanUrl = baseScheme + "://" + baseDomain + linkParts.path;
             size_t fragPos = cleanUrl.find('#');
             if (fragPos != std::string::npos)
                 cleanUrl = cleanUrl.substr(0, fragPos);
