@@ -24,27 +24,51 @@ struct PageData {
 
 static PageData parseWorkerBResult(const std::string& msg) {
     PageData data;
-    std::istringstream stream(msg);
+    std::cerr << "[parse] fresh PageData: &data=" << (void*)&data 
+          << " &foundLinks=" << (void*)&data.foundLinks
+          << " foundLinks.size()=" << data.foundLinks.size() << std::endl;
+std::istringstream stream(msg);
+std::cerr << "[parse] after istringstream constructed: foundLinks.size()=" << data.foundLinks.size() << std::endl;
     std::string line;
+
+    std::cerr << "[parse] msg bytes: ";
+    for (size_t i = 0; i < std::min(msg.size(), size_t(100)); i++)
+        std::cerr << std::hex << (int)(unsigned char)msg[i] << " ";
+    std::cerr << std::dec << std::endl;
+
     while (std::getline(stream, line)) {
         // Strip \r if present (HTTP line endings)
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
         if (line.empty()) continue;
 
-        if (line.rfind("URL:", 0) == 0)
+        if (line.rfind("URL:", 0) == 0) {
             data.url = line.substr(4);
-        else if (line.rfind("IMAGES:", 0) == 0)
+            std::cerr << "[parse] URL='" << data.url << "'" << std::endl;
+        } else if (line.rfind("IMAGES:", 0) == 0) {
             try { data.imageCount = std::stoi(line.substr(7)); } catch (...) {}
-        else if (line.rfind("LINKS:", 0) == 0)
-            try { data.linkCount = std::stoi(line.substr(6)); } catch (...) {}
-        else if (line.rfind("FORMS:", 0) == 0)
+        } else if (line.rfind("LINKS:", 0) == 0) {
+            std::string val = line.substr(6);
+            std::cerr << "[parse] LINKS val='" << val << "' len=" << val.size()
+                    << " &data.foundLinks=" << (void*)&data.foundLinks
+                    << " foundLinks.size()=" << data.foundLinks.size() << std::endl;
+            try { data.linkCount = std::stoi(val); } catch (...) { std::cerr << "[parse] LINKS stoi threw" << std::endl; }
+            std::cerr << "[parse] after LINKS parse, foundLinks.size()=" << data.foundLinks.size() << std::endl;
+        } else if (line.rfind("FORMS:", 0) == 0) {
             try { data.formCount = std::stoi(line.substr(6)); } catch (...) {}
-        else if (line.rfind("LINK:", 0) == 0)
-            data.foundLinks.push_back(line.substr(5));
-        else if (line.rfind("HEADING:", 0) == 0)
-            data.headings.push_back(line.substr(8));
+        } else if (line.rfind("LINK:", 0) == 0) {
+            std::string val = line.substr(5);
+            std::cerr << "[parse] LINK val='" << val << "' len=" << val.size()
+                      << " foundLinks.size()=" << data.foundLinks.size() << std::endl;
+            data.foundLinks.push_back(val);
+            std::cerr << "[parse] push_back OK, foundLinks.size()=" << data.foundLinks.size() << std::endl;
+        } else if (line.rfind("HEADING:", 0) == 0) {
+            std::string val = line.substr(8);
+            std::cerr << "[parse] HEADING val='" << val << "'" << std::endl;
+            data.headings.push_back(val);
+        }
     }
+    std::cerr << "[parse] done: url='" << data.url << "' links=" << data.foundLinks.size() << std::endl;
     return data;
 }
 
@@ -209,6 +233,10 @@ void runWorkerA(int rank, int N, int M) {
         } else {
             DBG(rank, "B rank=" << src << " sent result, parsing...");
             activeWorkers--;
+            std::cerr << "[workerA] before parse: msg.size()=" << msg.size()
+          << " msg.capacity()=" << msg.capacity()
+          << " msg.data()=" << (void*)msg.data() << std::endl;
+
             PageData result = parseWorkerBResult(msg);
             DBG(rank, "parsed result for url='" << result.url << "' links=" << result.foundLinks.size());
             pageResults[result.url] = result;
