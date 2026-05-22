@@ -1,5 +1,6 @@
 #include "parser.h"
 #include <algorithm>
+#include <sstream>
 
 bool startsWith(const std::string& s, const std::string& prefix) {
     return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
