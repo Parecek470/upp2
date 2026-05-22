@@ -59,10 +59,12 @@ namespace utils {
 		auto res = cli.Get(path.c_str());
 
 		if (!res || res->status != 200) {
-			std::cerr << "Chyba: " << res->status << std::endl;
+			if (res)
+				std::cerr << "Chyba: " << res->status << std::endl;
+			else
+				std::cerr << "Chyba: no response (network error)" << std::endl;
 			return "";
 		}
-
 		return res->body;
 	}
 

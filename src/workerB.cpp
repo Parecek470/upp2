@@ -39,7 +39,7 @@ void runWorkerB(int rank, int N, int M) {
         std::vector<char> urlBuf(msgSize + 1, '\0');   // +1 for guaranteed '\0'
         MPI_Recv(urlBuf.data(), msgSize, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        std::string url(urlBuf.data());
+        std::string url(urlBuf.data(), static_cast<size_t>(msgSize) - 1);
 
         if (url == "DONE") break;
 

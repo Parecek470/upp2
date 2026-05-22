@@ -27,23 +27,23 @@ static PageData parseWorkerBResult(const std::string& msg) {
     std::istringstream stream(msg);
     std::string line;
     while (std::getline(stream, line)) {
+        // Strip \r if present (HTTP line endings)
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty()) continue;
+
         if (line.rfind("URL:", 0) == 0)
             data.url = line.substr(4);
-        else if (line.rfind("IMAGES:", 0) == 0) {
+        else if (line.rfind("IMAGES:", 0) == 0)
             try { data.imageCount = std::stoi(line.substr(7)); } catch (...) {}
-        }
-        else if (line.rfind("LINKS:", 0) == 0) {
+        else if (line.rfind("LINKS:", 0) == 0)
             try { data.linkCount = std::stoi(line.substr(6)); } catch (...) {}
-        }
-        else if (line.rfind("FORMS:", 0) == 0) {
+        else if (line.rfind("FORMS:", 0) == 0)
             try { data.formCount = std::stoi(line.substr(6)); } catch (...) {}
-        }
+        else if (line.rfind("LINK:", 0) == 0)
+            data.foundLinks.push_back(line.substr(5));
         else if (line.rfind("HEADING:", 0) == 0)
             data.headings.push_back(line.substr(8));
-        else if (line.rfind("LINKS:", 0) == 0) {
-            std::string val = line.substr(6);
-            if (!val.empty()) data.linkCount = std::stoi(val);
-        }
     }
     return data;
 }
