@@ -86,20 +86,24 @@ std::string makeDirectoryName(const std::string& baseUrl) {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
     std::ostringstream oss;
-    // FIX: compact format matching the spec: YYYYMMDDHHmm + safe URL name
-    oss << std::put_time(&tm, "%Y%m%d%H%M");
+    // Format: YYYY_MM_DD_HH_MM_ then safe URL name
+    oss << std::put_time(&tm, "%Y_%m_%d_%H_%M_");
 
     std::string safe = baseUrl;
     // Strip scheme (http:// or https://)
     auto schemeEnd = safe.find("://");
     if (schemeEnd != std::string::npos)
         safe = safe.substr(schemeEnd + 3);
-    // Replace non-alphanumeric (except '-') with nothing (spec: "bezpecna forma")
+    // Strip trailing slash
+    if (!safe.empty() && safe.back() == '/')
+        safe.pop_back();
+    // Replace dots, slashes, colons and any other non-alphanumeric (except '-') with '_'
     std::string cleaned;
     for (char c : safe) {
         if (std::isalnum(c) || c == '-')
             cleaned += c;
-        // drop everything else (dots, slashes, colons)
+        else
+            cleaned += '_';
     }
     oss << cleaned;
     return oss.str();
@@ -109,30 +113,54 @@ void createDirectory(const std::string& path) {
     mkdir(path.c_str(), 0755);
 }
 
+// Returns the URI path portion of a URL relative to baseUrl.
+// e.g. baseUrl="http://upp-test-1.martinubl.cz", url="http://upp-test-1.martinubl.cz/galerie" -> "/galerie"
+// If url equals baseUrl (with or without trailing slash) the path is "/".
+static std::string toRelativePath(const std::string& url, const std::string& baseUrl) {
+    // Strip trailing slash from baseUrl for consistent prefix matching
+    std::string base = baseUrl;
+    if (!base.empty() && base.back() == '/')
+        base.pop_back();
+
+    if (url == base || url == base + "/")
+        return "/";
+
+    if (url.size() > base.size() && url.substr(0, base.size()) == base)
+        return url.substr(base.size());
+
+    // Fallback: return the url as-is
+    return url;
+}
+
 void writeMapFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
+    const std::string& base = results.baseUrl;
 
-    // Section 1: one node (URI path) per line — no quotes per spec example
+    // Section 1: one node (URI path) per line, quoted
     for (const auto& [url, data] : results.pages)
-        file << url << "\n";
+        file << '"' << toRelativePath(url, base) << '"' << "\n";
 
-    // Section 2: edge pairs — no quotes per spec example
+    // Section 2: edge pairs, quoted
     for (const auto& [source, target] : results.edges)
-        file << source << " " << target << "\n";
+        file << '"' << toRelativePath(source, base) << '"'
+             << ' '
+             << '"' << toRelativePath(target, base) << '"'
+             << "\n";
 
     file.close();
 }
 
 void writeContentFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
+    const std::string& base = results.baseUrl;
 
     for (const auto& [url, data] : results.pages) {
-        file << url << "\n";                              // no quotes per spec
+        file << '"' << toRelativePath(url, base) << '"' << "\n";  // quoted relative path
         file << "IMAGES " << data.imageCount << "\n";
         file << "LINKS "  << data.linkCount  << "\n";
         file << "FORMS "  << data.formCount  << "\n";
         for (const auto& heading : data.headings)
-            file << heading << "\n";                      // already has dash prefix
+            file << heading << "\n";  // already has dash prefix
         file << "\n";
     }
 
