@@ -43,8 +43,8 @@ namespace utils {
 		}
 
 		size_t pos = rest.find("/");
-		std::string domain = rest.substr(0, pos);
-		std::string path = rest.substr(pos);
+		std::string domain = (pos != std::string::npos) ? rest.substr(0, pos) : rest;
+		std::string path   = (pos != std::string::npos) ? rest.substr(pos)   : "/";
 
 		// stahne obsah stranky - pouzije SSL klienta, pokud je pozadovana podpora SSL
 #ifdef USE_SSL
