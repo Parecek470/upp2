@@ -38,6 +38,10 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
     for (size_t i = 0; i < URLs.size(); i++) {
         int workerARank = 1 + (i % g_N);
         std::string url = URLs[i];
+        // Strip \r and trailing whitespace (HTTP form bodies use \r\n line endings)
+        while (!url.empty() && (url.back() == '\r' || url.back() == '\n' || url.back() == ' '))
+            url.pop_back();
+        if (url.empty()) continue;
         MPI_Send(url.c_str(), (int)(url.size() + 1), MPI_CHAR, workerARank, 0, MPI_COMM_WORLD);
 
         outputHtml << "<p>Assigned URL: <strong>" << url << "</strong> to Worker A #" << workerARank << "</p>";
