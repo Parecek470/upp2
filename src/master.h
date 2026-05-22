@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 
 struct PageData {
     std::string url;
@@ -14,7 +15,7 @@ struct PageData {
 struct CrawlResults {
     std::string baseUrl;
     std::map<std::string, PageData> pages;
-    std::vector<std::pair<std::string, std::string>> edges;
+    std::set<std::pair<std::string, std::string>> edges;
 };
 
 CrawlResults parseMasterResult(const std::string& msg);

@@ -27,7 +27,6 @@ void runWorkerB(int rank, int N, int M) {
         std::string ctrl(ctrlBuf.data());
 
         if (ctrl == "SHUTDOWN") break;
-        // ctrl == "WORK" — fall through to run the job
         runWorkerB_job(rank, N, M);
     }
 }
@@ -36,15 +35,13 @@ void runWorkerB_job(int rank, int N, int M) {
     int workerAId = calculateParentWorkerA(rank, N, M);
 
     while (true) {
-        // Tell Worker A we are ready for work
+        // Tell Worker A it can work
         MPI_Send("READY", 6, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
         MPI_Status status;
         MPI_Probe(workerAId, 0, MPI_COMM_WORLD, &status);
 
         int msgSize = 0;
         MPI_Get_count(&status, MPI_CHAR, &msgSize);
-
-        if (msgSize <= 0) continue;  // should never happen, but be safe
 
         std::vector<char> urlBuf(msgSize + 1, '\0'); 
         MPI_Recv(urlBuf.data(), msgSize, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -64,9 +61,9 @@ void runWorkerB_job(int rank, int N, int M) {
 
         // Serialize result
         std::string result;
-        result += "URL:"    + url + "\n";
+        result += "URL:" + url + "\n";
         result += "IMAGES:" + std::to_string(imgCount)   + "\n";
-        result += "LINKS:"  + std::to_string(linkCount)  + "\n";  // all links, not just same-domain
+        result += "LINKS:"  + std::to_string(linkCount)  + "\n";
         result += "FORMS:"  + std::to_string(formCount)  + "\n";
 
         for (const auto& link : links)

@@ -2,9 +2,7 @@
 #include <algorithm>
 #include <sstream>
 
-bool startsWith(const std::string& s, const std::string& prefix) {
-    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
-}
+
 
 URLParts parseURL(const std::string& url) {
     URLParts parts;
@@ -29,11 +27,10 @@ URLParts parseURL(const std::string& url) {
     return parts;
 }
 
-// Normalize a URL path by resolving . and .. segments.
+// Normalize a URL
 static std::string normalizePath(const std::string& path) {
     std::vector<std::string> segments;
-    std::istringstream ss(path);
-    std::string seg;
+    
     bool leadingSlash = (!path.empty() && path[0] == '/');
 
     size_t start = 0;
@@ -66,10 +63,12 @@ static std::string normalizePath(const std::string& path) {
         if (i > 0) result += "/";
         result += resolved[i];
     }
-    // Preserve trailing slash if original had one (and it's not just "/")
+
+
     if (result != "/" && !path.empty() && path.back() == '/')
         result += "/";
     if (result.empty()) result = "/";
+
     return result;
 }
 
@@ -91,7 +90,7 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
     size_t pos = 0;
 
     URLParts baseParts = parseURL(baseUrl);
-    std::string baseScheme = baseParts.scheme;          // "http" or "https"
+    std::string baseScheme = baseParts.scheme;
     std::string baseDomain = baseParts.domain;          
 
     while ((pos = html.find("<a ", pos)) != std::string::npos) {

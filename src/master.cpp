@@ -65,7 +65,7 @@ CrawlResults parseMasterResult(const std::string& msg) {
                 if (secondPipe != std::string::npos) {
                     std::string source = line.substr(firstPipe, secondPipe - firstPipe);
                     std::string target = line.substr(secondPipe + 1);
-                    results.edges.push_back({source, target});
+                    results.edges.insert({source, target});
                 }
             }
         }
@@ -74,7 +74,7 @@ CrawlResults parseMasterResult(const std::string& msg) {
     return results;
 }
 
-// Returns the current timestamp as a string in "YYYY-MM-DD HH:MM:SS" format.
+// Returns the current timestamp
 std::string getCurrentTimestamp() {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
@@ -83,7 +83,7 @@ std::string getCurrentTimestamp() {
     return oss.str();
 }
 
-// Generates a directory name based on the current timestamp and the base URL.
+// Generates a directory name
 std::string makeDirectoryName(const std::string& baseUrl) {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
@@ -115,9 +115,8 @@ void createDirectory(const std::string& path) {
 
 // Returns the URI path portion of a URL relative to baseUrl.
 static std::string toRelativePath(const std::string& url, const std::string& baseUrl) {
-    // Strip trailing slash and whitespace/\r from baseUrl for consistent prefix matching
     std::string base = baseUrl;
-    while (!base.empty() && (base.back() == '/' || base.back() == '\r' || base.back() == '\n' || base.back() == ' '))
+    if (!base.empty() && base.back() == '/')
         base.pop_back();
 
     if (url == base || url == base + "/")

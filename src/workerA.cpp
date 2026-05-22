@@ -33,12 +33,12 @@ static WorkerAPageData parseWorkerBResult(const std::string& msg) {
         if (line.rfind("URL:", 0) == 0) {
             data.url = line.substr(4);
         } else if (line.rfind("IMAGES:", 0) == 0) {
-            try { data.imageCount = std::stoi(line.substr(7)); } catch (...) {}
+            data.imageCount = std::stoi(line.substr(7));
         } else if (line.rfind("LINKS:", 0) == 0) {
             std::string val = line.substr(6);
-            try { data.linkCount = std::stoi(val); } catch (...) {}
+            data.linkCount = std::stoi(val);
         } else if (line.rfind("FORMS:", 0) == 0) {
-            try { data.formCount = std::stoi(line.substr(6)); } catch (...) {}
+            data.formCount = std::stoi(line.substr(6));
         } else if (line.rfind("LINK:", 0) == 0) {
             std::string val = line.substr(5);
             data.foundLinks.push_back(val);
@@ -53,7 +53,7 @@ static WorkerAPageData parseWorkerBResult(const std::string& msg) {
 static std::string serializeResults(
     const std::string& baseUrl,
     const std::map<std::string, WorkerAPageData>& pageResults,
-    const std::vector<std::pair<std::string, std::string>>& linkGraph)
+    const std::set<std::pair<std::string, std::string>>& linkGraph)
 {
     std::string result;
     result += "BASE_URL|" + baseUrl + "\n";
@@ -75,7 +75,7 @@ static std::string serializeResults(
     return result;
 }
 
-// Safe blocking recv — Probe first, then Recv with exact size
+// Safely receive a string message from the given source and tag, handling zero-length messages.
 static std::string safeRecv(int source, int tag, int myRank) {
     MPI_Status st;
     MPI_Probe(source, tag, MPI_COMM_WORLD, &st);
@@ -83,39 +83,21 @@ static std::string safeRecv(int source, int tag, int myRank) {
     int n = 0;
     MPI_Get_count(&st, MPI_CHAR, &n);
     if (n <= 0) {
-        // Still must consume the message, recv with 1 byte
         char dummy = 0;
         MPI_Recv(&dummy, 0, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         return "";
     }
 
-    // Use a heap buffer via vector, guaranteed null at back
-    std::vector<char> buf(static_cast<size_t>(n) + 1, '\0');
+    std::vector<char> buf(static_cast<size_t>(n));
     MPI_Recv(buf.data(), n, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    buf[n] = '\0';  // belt-and-suspenders null termination
-
-    size_t len = (n > 0 && buf[n - 1] == '\0') ? static_cast<size_t>(n) - 1 
-                                             : static_cast<size_t>(n);
-    std::string s(buf.data(), len);
-    // Trim any trailing null bytes just in case
-    while (!s.empty() && s.back() == '\0')
-        s.pop_back();
-
-    return s;
+    // buf[n-1] == '\0' because sender sent size()+1
+    return std::string(buf.data(), static_cast<size_t>(n) - 1);
 }
 
 // Outer loop: wait for WORK/SHUTDOWN from master on tag 1, then run one crawl job.
 void runWorkerA(int rank, int N, int M) {
     while (true) {
-        // Block until master sends a control message on tag 1
-        MPI_Status ctrlStatus;
-        MPI_Probe(0, 1, MPI_COMM_WORLD, &ctrlStatus);
-        int ctrlLen = 0;
-        MPI_Get_count(&ctrlStatus, MPI_CHAR, &ctrlLen);
-        std::vector<char> ctrlBuf(ctrlLen + 1, '\0');
-        MPI_Recv(ctrlBuf.data(), ctrlLen, MPI_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        std::string ctrl(ctrlBuf.data());
-
+        std::string ctrl = safeRecv(0, 1, rank);
         if (ctrl == "SHUTDOWN") break;
         // ctrl == "WORK" — fall through to run the job
         runWorkerA_job(rank, N, M);
@@ -135,14 +117,14 @@ void runWorkerA_job(int rank, int N, int M) {
     std::set<std::string>    visitedUrls;
     std::queue<std::string>  workQueue;
     std::map<std::string, WorkerAPageData> pageResults;
-    std::vector<std::pair<std::string, std::string>> linkGraph;
+    std::set<std::pair<std::string, std::string>> linkGraph;
     std::queue<int>          idleWorkers;
     int                      activeWorkers = 0;
     int                      doneCount = 0;
 
     workQueue.push(baseUrl);
 
-    // Dispatch one URL to workerBRank, or park/DONE it
+    // Dispatch one URL to workerBRank untill queue is empty, then park worker in idleWorkers. 
     auto tryDispatch = [&](int bRank) -> bool {
         while (!workQueue.empty() && visitedUrls.count(workQueue.front()))
             workQueue.pop();
@@ -175,27 +157,8 @@ void runWorkerA_job(int rank, int N, int M) {
             }
         }
 
-        // Confirmed message from status.MPI_SOURCE — do a blocking Probe to refresh count
         int src = status.MPI_SOURCE;
-
-        MPI_Probe(src, 0, MPI_COMM_WORLD, &status);
-        int msgSize = 0;
-        MPI_Get_count(&status, MPI_CHAR, &msgSize);
-
-        if (msgSize <= 0) {
-            char dummy = 0;
-            MPI_Recv(&dummy, 0, MPI_CHAR, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            continue;
-        }
-
-        std::vector<char> buf(static_cast<size_t>(msgSize) + 1, '\0');
-        MPI_Recv(buf.data(), msgSize, MPI_CHAR, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        buf[msgSize] = '\0';
-
-        size_t actualLen = (msgSize > 0 && buf[msgSize - 1] == '\0') 
-                ? static_cast<size_t>(msgSize) - 1 
-                : static_cast<size_t>(msgSize);
-        std::string msg(buf.data(), actualLen);
+        std::string msg = safeRecv(src, 0, rank);
 
         if (msg == "READY") {
             bool dispatched = tryDispatch(src);
@@ -210,7 +173,7 @@ void runWorkerA_job(int rank, int N, int M) {
                 std::string url = result.url;                        // save before move
                 pageResults[url] = std::move(result);
                 for (const auto& link : pageResults[url].foundLinks) {
-                    linkGraph.push_back({url, link});
+                    linkGraph.insert({url, link});
                     if (!visitedUrls.count(link))
                         workQueue.push(link);
                 }
