@@ -11,9 +11,10 @@
 #include "workerA.h"
 #include "parser.h"
 
-// ---------------------------------------------------------------------------
-// Local types
-// ---------------------------------------------------------------------------
+// DEBUG macro — prints to stderr with rank prefix, flushes immediately
+#define DBG(rank, msg) \
+    do { std::cerr << "[WorkerA rank=" << (rank) << "] " << msg << std::endl; } while(0)
+
 struct PageData {
     std::string url;
     int imageCount = 0, linkCount = 0, formCount = 0;
@@ -21,14 +22,10 @@ struct PageData {
     std::vector<std::string> foundLinks;
 };
 
-// ---------------------------------------------------------------------------
-// Parse the result message that Worker B sends back
-// ---------------------------------------------------------------------------
 static PageData parseWorkerBResult(const std::string& msg) {
     PageData data;
     std::istringstream stream(msg);
     std::string line;
-
     while (std::getline(stream, line)) {
         if (line.rfind("URL:", 0) == 0)
             data.url = line.substr(4);
@@ -46,9 +43,6 @@ static PageData parseWorkerBResult(const std::string& msg) {
     return data;
 }
 
-// ---------------------------------------------------------------------------
-// Serialize all results into a single string for sending back to Master
-// ---------------------------------------------------------------------------
 static std::string serializeResults(
     const std::string& baseUrl,
     const std::map<std::string, PageData>& pageResults,
@@ -56,131 +50,115 @@ static std::string serializeResults(
 {
     std::string result;
     result += "BASE_URL|" + baseUrl + "\n";
-
     result += "BEGIN_PAGES\n";
     for (const auto& [url, data] : pageResults) {
         result += "PAGE|"   + url + "\n";
         result += "IMAGES|" + std::to_string(data.imageCount) + "\n";
         result += "LINKS|"  + std::to_string(data.linkCount)  + "\n";
         result += "FORMS|"  + std::to_string(data.formCount)  + "\n";
-        for (const auto& heading : data.headings)
-            result += "HEADING|" + heading + "\n";
+        for (const auto& h : data.headings)
+            result += "HEADING|" + h + "\n";
         result += "END_PAGE\n";
     }
     result += "END_PAGES\n";
-
     result += "BEGIN_GRAPH\n";
-    for (const auto& [source, target] : linkGraph)
-        result += "EDGE|" + source + "|" + target + "\n";
+    for (const auto& [s, t] : linkGraph)
+        result += "EDGE|" + s + "|" + t + "\n";
     result += "END_GRAPH\n";
-
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// Safely receive a variable-length MPI_CHAR message from a known source.
-// Uses MPI_Probe (blocking) so we never allocate before we know the real size.
-// ---------------------------------------------------------------------------
-static std::string recvString(int source, int tag) {
-    MPI_Status status;
-    MPI_Probe(source, tag, MPI_COMM_WORLD, &status);
+// Safe blocking recv — Probe first, then Recv with exact size
+static std::string safeRecv(int source, int tag, int myRank) {
+    DBG(myRank, "safeRecv: probing src=" << source << " tag=" << tag);
+    MPI_Status st;
+    MPI_Probe(source, tag, MPI_COMM_WORLD, &st);
 
-    int msgSize = 0;
-    MPI_Get_count(&status, MPI_CHAR, &msgSize);
+    int n = 0;
+    MPI_Get_count(&st, MPI_CHAR, &n);
+    DBG(myRank, "safeRecv: MPI_Get_count=" << n << " from src=" << source);
 
-    // Guard against MPI_UNDEFINED or zero-length messages
-    if (msgSize <= 0) return "";
+    if (n <= 0) {
+        DBG(myRank, "safeRecv: WARNING n<=0, returning empty");
+        // Still must consume the message, recv with 1 byte
+        char dummy = 0;
+        MPI_Recv(&dummy, 0, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        return "";
+    }
 
-    std::vector<char> buf(msgSize);
-    MPI_Recv(buf.data(), msgSize, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    // Use a heap buffer via vector, guaranteed null at back
+    std::vector<char> buf(static_cast<size_t>(n) + 1, '\0');
+    MPI_Recv(buf.data(), n, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    buf[n] = '\0';  // belt-and-suspenders null termination
 
-    // Null-terminate just in case, then build string
-    buf.back() = '\0';
-    return std::string(buf.data());
+    std::string s(buf.data(), static_cast<size_t>(n) - 1);  // exclude the null Worker B includes
+    // Trim any trailing null bytes just in case
+    while (!s.empty() && s.back() == '\0')
+        s.pop_back();
+
+    DBG(myRank, "safeRecv: got msg of len=" << s.size() << " content='" << s.substr(0, 40) << (s.size()>40?"...":"") << "'");
+    return s;
 }
 
-// ---------------------------------------------------------------------------
-// Main Worker A logic
-// ---------------------------------------------------------------------------
 void runWorkerA(int rank, int N, int M) {
-    // My Worker B children occupy contiguous ranks:
-    //   Worker A rank r (1-based): firstB = N+1 + (r-1)*M  ..  firstB+M-1
     const int firstB = N + 1 + (rank - 1) * M;
+    DBG(rank, "started. firstB=" << firstB << " M=" << M);
 
-    // -----------------------------------------------------------------------
-    // Step 1: receive the initial URL assigned by Master (blocking on tag 0)
-    // -----------------------------------------------------------------------
-    std::string baseUrl = recvString(0, 0);
+    // Step 1: receive initial URL from Master
+    DBG(rank, "waiting for URL from master (rank 0)");
+    std::string baseUrl = safeRecv(0, 0, rank);
+    DBG(rank, "received baseUrl='" << baseUrl << "'");
+
     if (baseUrl.empty()) {
-        // Nothing to do — send empty result back
+        DBG(rank, "empty baseUrl, sending empty result to master");
         std::string empty = serializeResults("", {}, {});
-        MPI_Send(empty.c_str(), (int)(empty.size() + 1), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(empty.c_str(), static_cast<int>(empty.size()) + 1, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
         return;
     }
 
-    // -----------------------------------------------------------------------
-    // Crawling data structures
-    // -----------------------------------------------------------------------
-    std::set<std::string>   visitedUrls;
-    std::queue<std::string> workQueue;
+    std::set<std::string>    visitedUrls;
+    std::queue<std::string>  workQueue;
     std::map<std::string, PageData> pageResults;
     std::vector<std::pair<std::string, std::string>> linkGraph;
+    std::queue<int>          idleWorkers;
+    int                      activeWorkers = 0;
+    int                      doneCount = 0;
 
     workQueue.push(baseUrl);
 
-    // Track which B workers are currently idle (sent READY, waiting for a URL)
-    // and which are busy (sent a URL, waiting for result).
-    std::queue<int> idleWorkers;   // ranks of Worker B that sent READY
-    int             activeWorkers = 0; // number of B workers currently processing
-
-    // -----------------------------------------------------------------------
-    // Helper: dispatch one URL to an idle Worker B, or send DONE if finished.
-    // Returns true if a URL was dispatched, false if DONE was sent.
-    // -----------------------------------------------------------------------
-    auto tryDispatch = [&](int workerBRank) -> bool {
-        // Drain already-visited URLs from the front of the queue
-        while (!workQueue.empty() && visitedUrls.count(workQueue.front())) {
+    // Dispatch one URL to workerBRank, or park/DONE it
+    auto tryDispatch = [&](int bRank) -> bool {
+        while (!workQueue.empty() && visitedUrls.count(workQueue.front()))
             workQueue.pop();
-        }
 
         if (!workQueue.empty()) {
-            std::string nextUrl = workQueue.front();
-            workQueue.pop();
-            visitedUrls.insert(nextUrl);
-
-            MPI_Send(nextUrl.c_str(), (int)(nextUrl.size() + 1), MPI_CHAR,
-                     workerBRank, 0, MPI_COMM_WORLD);
+            std::string url = workQueue.front(); workQueue.pop();
+            visitedUrls.insert(url);
+            DBG(rank, "dispatching '" << url << "' to B rank=" << bRank);
+            MPI_Send(url.c_str(), static_cast<int>(url.size()) + 1, MPI_CHAR, bRank, 0, MPI_COMM_WORLD);
             activeWorkers++;
             return true;
         }
-
-        // Queue is empty right now — if other workers are busy, they may add
-        // new URLs when they return.  Park this worker in the idle queue.
         if (activeWorkers > 0) {
-            idleWorkers.push(workerBRank);
+            DBG(rank, "queue empty but " << activeWorkers << " active, parking B rank=" << bRank);
+            idleWorkers.push(bRank);
             return false;
         }
-
-        // Truly nothing left: queue empty AND no active workers → send DONE
-        MPI_Send("DONE", 5, MPI_CHAR, workerBRank, 0, MPI_COMM_WORLD);
+        DBG(rank, "all done, sending DONE to B rank=" << bRank);
+        MPI_Send("DONE", 5, MPI_CHAR, bRank, 0, MPI_COMM_WORLD);
         return false;
     };
 
-    // -----------------------------------------------------------------------
-    // Step 2: main event loop
-    //
-    // We only exit when:
-    //   - The work queue is empty
-    //   - No Worker B is actively processing
-    //   - All idle Workers have been sent DONE
-    // -----------------------------------------------------------------------
-    int doneCount = 0;  // how many Worker B have been told DONE
-
+    // Main event loop
     while (doneCount < M) {
-        // Poll all our Worker B children for an incoming message (READY or result)
+        DBG(rank, "loop: doneCount=" << doneCount << "/" << M
+            << " activeWorkers=" << activeWorkers
+            << " queueSize=" << workQueue.size()
+            << " idleWorkers=" << idleWorkers.size());
+
+        // Spin-probe all B children for any incoming message
         MPI_Status status;
         bool found = false;
-
         while (!found) {
             for (int b = firstB; b < firstB + M; b++) {
                 int flag = 0;
@@ -189,61 +167,60 @@ void runWorkerA(int rank, int N, int M) {
             }
         }
 
-        // We know the source and exact count from the successful Iprobe.
-        // Use a blocking Probe on that specific source to get a reliable status,
-        // then Recv — this avoids any Iprobe/Recv race.
-        MPI_Probe(status.MPI_SOURCE, 0, MPI_COMM_WORLD, &status);
+        // Confirmed message from status.MPI_SOURCE — do a blocking Probe to refresh count
+        int src = status.MPI_SOURCE;
+        DBG(rank, "incoming message from B rank=" << src);
 
+        MPI_Probe(src, 0, MPI_COMM_WORLD, &status);
         int msgSize = 0;
         MPI_Get_count(&status, MPI_CHAR, &msgSize);
-        int workerBRank = status.MPI_SOURCE;
+        DBG(rank, "msgSize=" << msgSize << " from B rank=" << src);
 
-        if (msgSize <= 0) continue;   // defensive: skip empty/undefined
+        if (msgSize <= 0) {
+            DBG(rank, "WARNING: msgSize<=0, consuming and skipping");
+            char dummy = 0;
+            MPI_Recv(&dummy, 0, MPI_CHAR, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            continue;
+        }
 
-        std::vector<char> buf(msgSize);
-        MPI_Recv(buf.data(), msgSize, MPI_CHAR, workerBRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        buf.back() = '\0';
+        // Safe recv with exact allocation
+        std::vector<char> buf(static_cast<size_t>(msgSize) + 1, '\0');
+        MPI_Recv(buf.data(), msgSize, MPI_CHAR, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        buf[msgSize] = '\0';
+
+        // Build string, excluding any trailing null that the sender included
         std::string msg(buf.data());
+        DBG(rank, "msg from B rank=" << src << ": '" << msg.substr(0, 60) << (msg.size()>60?"...":"") << "'");
 
         if (msg == "READY") {
-            // Worker B is idle and wants work
-            bool dispatched = tryDispatch(workerBRank);
-            if (!dispatched && activeWorkers == 0) {
-                // tryDispatch sent DONE directly
+            DBG(rank, "B rank=" << src << " is READY");
+            bool dispatched = tryDispatch(src);
+            if (!dispatched && activeWorkers == 0)
                 doneCount++;
-            }
-            // else: parked in idleWorkers, will be dispatched when results arrive
         } else {
-            // Worker B sent back a crawl result
+            DBG(rank, "B rank=" << src << " sent result, parsing...");
             activeWorkers--;
-
             PageData result = parseWorkerBResult(msg);
+            DBG(rank, "parsed result for url='" << result.url << "' links=" << result.foundLinks.size());
             pageResults[result.url] = result;
-
             for (const auto& link : result.foundLinks) {
                 linkGraph.push_back({result.url, link});
                 if (!visitedUrls.count(link))
                     workQueue.push(link);
             }
-
-            // Now that we may have new URLs, dispatch to any parked idle workers
+            // Dispatch to any parked idle workers now that queue may have grown
             while (!idleWorkers.empty()) {
-                int idleB = idleWorkers.front();
-                idleWorkers.pop();
-
+                int idleB = idleWorkers.front(); idleWorkers.pop();
                 bool dispatched = tryDispatch(idleB);
-                if (!dispatched && activeWorkers == 0) {
-                    // Queue still empty and nobody else is working → DONE was sent
+                if (!dispatched && activeWorkers == 0)
                     doneCount++;
-                }
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Step 3: send aggregated results back to Master (tag 0)
-    // -----------------------------------------------------------------------
+    DBG(rank, "all B workers done, serializing and sending to master");
     std::string finalResults = serializeResults(baseUrl, pageResults, linkGraph);
-    MPI_Send(finalResults.c_str(), (int)(finalResults.size() + 1), MPI_CHAR,
-             0, 0, MPI_COMM_WORLD);
+    DBG(rank, "final result size=" << finalResults.size() << " bytes");
+    MPI_Send(finalResults.c_str(), static_cast<int>(finalResults.size()) + 1, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+    DBG(rank, "done, exiting runWorkerA");
 }
