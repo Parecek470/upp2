@@ -33,6 +33,55 @@ URLParts parseURL(const std::string& url) {
     return parts;
 }
 
+// Normalize a URL path by resolving . and .. segments.
+// e.g. "/projekty/../o-nas.html" -> "/o-nas.html"
+//      "/a/b/./c/../d.html"      -> "/a/b/d.html"
+static std::string normalizePath(const std::string& path) {
+    // Split on '/'
+    std::vector<std::string> segments;
+    std::istringstream ss(path);
+    std::string seg;
+    bool leadingSlash = (!path.empty() && path[0] == '/');
+
+    // We need istringstream from <sstream> — it is already included via parser.h transitively,
+    // but include guard is in the .cpp; use manual split instead to be safe.
+    size_t start = 0;
+    while (start < path.size()) {
+        size_t slash = path.find('/', start);
+        if (slash == std::string::npos) {
+            segments.push_back(path.substr(start));
+            break;
+        }
+        if (slash > start)
+            segments.push_back(path.substr(start, slash - start));
+        else
+            segments.push_back(""); // leading or consecutive slash
+        start = slash + 1;
+    }
+
+    std::vector<std::string> resolved;
+    for (const auto& s : segments) {
+        if (s == "." || s.empty()) {
+            // skip
+        } else if (s == "..") {
+            if (!resolved.empty()) resolved.pop_back();
+        } else {
+            resolved.push_back(s);
+        }
+    }
+
+    std::string result = leadingSlash ? "/" : "";
+    for (size_t i = 0; i < resolved.size(); ++i) {
+        if (i > 0) result += "/";
+        result += resolved[i];
+    }
+    // Preserve trailing slash if original had one (and it's not just "/")
+    if (result != "/" && !path.empty() && path.back() == '/')
+        result += "/";
+    if (result.empty()) result = "/";
+    return result;
+}
+
 int countTag(const std::string& html, const std::string& tag) {
     int count = 0;
     size_t pos = 0;
@@ -118,8 +167,8 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
         // (avoids scheme mismatch in visitedUrls, toRelativePath, and downloadHTML).
         URLParts linkParts = parseURL(absUrl);
         if (linkParts.domain == baseDomain) {
-            // Use baseScheme, not linkParts.scheme, so http/https mismatches don't fragment the graph
-            std::string cleanUrl = baseScheme + "://" + baseDomain + linkParts.path;
+            // Resolve any . and .. segments so URLs are canonical before dedup/queueing
+            std::string cleanUrl = baseScheme + "://" + baseDomain + normalizePath(linkParts.path);
             size_t fragPos = cleanUrl.find('#');
             if (fragPos != std::string::npos)
                 cleanUrl = cleanUrl.substr(0, fragPos);
