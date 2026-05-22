@@ -15,16 +15,16 @@
 #define DBG(rank, msg) \
     do { std::cerr << "[WorkerA rank=" << (rank) << "] " << msg << std::endl; } while(0)
 
-struct PageData {
+struct WorkerAPageData {
     std::string url;
     int imageCount = 0, linkCount = 0, formCount = 0;
     std::vector<std::string> headings;
     std::vector<std::string> foundLinks;
 };
 
-static PageData parseWorkerBResult(const std::string& msg) {
-    PageData data{};
-    std::cerr << "[parse] fresh PageData: &data=" << (void*)&data 
+static WorkerAPageData parseWorkerBResult(const std::string& msg) {
+    WorkerAPageData data{};
+    std::cerr << "[parse] fresh WorkerAPageData: &data=" << (void*)&data 
           << " &foundLinks=" << (void*)&data.foundLinks
           << " foundLinks.size()=" << data.foundLinks.size() << std::endl;
 std::istringstream stream(msg);
@@ -74,7 +74,7 @@ std::cerr << "[parse] after istringstream constructed: foundLinks.size()=" << da
 
 static std::string serializeResults(
     const std::string& baseUrl,
-    const std::map<std::string, PageData>& pageResults,
+    const std::map<std::string, WorkerAPageData>& pageResults,
     const std::vector<std::pair<std::string, std::string>>& linkGraph)
 {
     std::string result;
@@ -149,7 +149,7 @@ void runWorkerA(int rank, int N, int M) {
 
     std::set<std::string>    visitedUrls;
     std::queue<std::string>  workQueue;
-    std::map<std::string, PageData> pageResults;
+    std::map<std::string, WorkerAPageData> pageResults;
     std::vector<std::pair<std::string, std::string>> linkGraph;
     std::queue<int>          idleWorkers;
     int                      activeWorkers = 0;
@@ -238,7 +238,7 @@ void runWorkerA(int rank, int N, int M) {
           << " msg.capacity()=" << msg.capacity()
           << " msg.data()=" << (void*)msg.data() << std::endl;
 
-            PageData result = parseWorkerBResult(msg);
+            WorkerAPageData result = parseWorkerBResult(msg);
             DBG(rank, "parsed result for url='" << result.url << "' links=" << result.foundLinks.size());
 
             if (!result.url.empty()) {
