@@ -131,7 +131,25 @@ static std::string safeRecv(int source, int tag, int myRank) {
     return s;
 }
 
+// Outer loop: wait for WORK/SHUTDOWN from master on tag 1, then run one crawl job.
 void runWorkerA(int rank, int N, int M) {
+    while (true) {
+        // Block until master sends a control message on tag 1
+        MPI_Status ctrlStatus;
+        MPI_Probe(0, 1, MPI_COMM_WORLD, &ctrlStatus);
+        int ctrlLen = 0;
+        MPI_Get_count(&ctrlStatus, MPI_CHAR, &ctrlLen);
+        std::vector<char> ctrlBuf(ctrlLen + 1, '\0');
+        MPI_Recv(ctrlBuf.data(), ctrlLen, MPI_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        std::string ctrl(ctrlBuf.data());
+
+        if (ctrl == "SHUTDOWN") break;
+        // ctrl == "WORK" — fall through to run the job
+        runWorkerA_job(rank, N, M);
+    }
+}
+
+void runWorkerA_job(int rank, int N, int M) {
     const int firstB = N + 1 + (rank - 1) * M;
     DBG(rank, "started. firstB=" << firstB << " M=" << M);
 
