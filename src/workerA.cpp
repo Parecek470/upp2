@@ -219,10 +219,11 @@ void runWorkerA(int rank, int N, int M) {
         MPI_Recv(buf.data(), msgSize, MPI_CHAR, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         buf[msgSize] = '\0';
 
-        // Build string, excluding any trailing null that the sender included
-        std::string msg(buf.data(), static_cast<size_t>(msgSize));
-        // Then strip trailing null if present:
-        while (!msg.empty() && msg.back() == '\0') msg.pop_back();
+        size_t actualLen = (msgSize > 0 && buf[msgSize - 1] == '\0') 
+                ? static_cast<size_t>(msgSize) - 1 
+                : static_cast<size_t>(msgSize);
+        std::string msg(buf.data(), actualLen);
+        // No need for the while-strip loop anymore — actualLen already excludes the null
         DBG(rank, "msg from B rank=" << src << ": '" << msg.substr(0, 60) << (msg.size()>60?"...":"") << "'");
 
         if (msg == "READY") {
