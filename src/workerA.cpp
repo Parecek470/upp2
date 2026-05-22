@@ -241,10 +241,11 @@ void runWorkerA(int rank, int N, int M) {
             PageData result = parseWorkerBResult(msg);
             DBG(rank, "parsed result for url='" << result.url << "' links=" << result.foundLinks.size());
 
-            if (!result.url.empty()) {                          // ← ADD THIS GUARD
-                pageResults[result.url] = std::move(result);    // ← use move to avoid copy of corrupt vector
-                for (const auto& link : pageResults[result.url].foundLinks) {
-                    linkGraph.push_back({result.url, link});     // careful: result is moved-from
+            if (!result.url.empty()) {
+                std::string url = result.url;                        // save before move
+                pageResults[url] = std::move(result);
+                for (const auto& link : pageResults[url].foundLinks) {
+                    linkGraph.push_back({url, link});
                     if (!visitedUrls.count(link))
                         workQueue.push(link);
                 }
