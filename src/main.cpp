@@ -24,6 +24,24 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
 
 }
 
+void parseArgs(int argc, char** argv, int& N, int& M) {
+    N = -1;
+    M = -1;
+    
+    for (int i = 1; i < argc - 1; i++) {
+        if (std::string(argv[i]) == "-n") {
+            N = std::stoi(argv[i + 1]);
+        } else if (std::string(argv[i]) == "-m") {
+            M = std::stoi(argv[i + 1]);
+        }
+    }
+    
+    if (N == -1 || M == -1) {
+        std::cerr << "Usage: ./upp2 -n <N> -m <M>\n";
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+}
+
 int main(int argc, char** argv) {
 
 	// inicializace serveru
