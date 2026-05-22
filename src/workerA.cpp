@@ -23,7 +23,7 @@ struct PageData {
 };
 
 static PageData parseWorkerBResult(const std::string& msg) {
-    PageData data;
+    PageData data{};
     std::cerr << "[parse] fresh PageData: &data=" << (void*)&data 
           << " &foundLinks=" << (void*)&data.foundLinks
           << " foundLinks.size()=" << data.foundLinks.size() << std::endl;
@@ -240,11 +240,14 @@ void runWorkerA(int rank, int N, int M) {
 
             PageData result = parseWorkerBResult(msg);
             DBG(rank, "parsed result for url='" << result.url << "' links=" << result.foundLinks.size());
-            pageResults[result.url] = result;
-            for (const auto& link : result.foundLinks) {
-                linkGraph.push_back({result.url, link});
-                if (!visitedUrls.count(link))
-                    workQueue.push(link);
+
+            if (!result.url.empty()) {                          // ← ADD THIS GUARD
+                pageResults[result.url] = std::move(result);    // ← use move to avoid copy of corrupt vector
+                for (const auto& link : pageResults[result.url].foundLinks) {
+                    linkGraph.push_back({result.url, link});     // careful: result is moved-from
+                    if (!visitedUrls.count(link))
+                        workQueue.push(link);
+                }
             }
             // Dispatch to any parked idle workers now that queue may have grown
             while (!idleWorkers.empty()) {
