@@ -29,16 +29,21 @@ static PageData parseWorkerBResult(const std::string& msg) {
     while (std::getline(stream, line)) {
         if (line.rfind("URL:", 0) == 0)
             data.url = line.substr(4);
-        else if (line.rfind("IMAGES:", 0) == 0)
-            data.imageCount = std::stoi(line.substr(7));
-        else if (line.rfind("LINKS:", 0) == 0)
-            data.linkCount = std::stoi(line.substr(6));
-        else if (line.rfind("FORMS:", 0) == 0)
-            data.formCount = std::stoi(line.substr(6));
+        else if (line.rfind("IMAGES:", 0) == 0) {
+            try { data.imageCount = std::stoi(line.substr(7)); } catch (...) {}
+        }
+        else if (line.rfind("LINKS:", 0) == 0) {
+            try { data.linkCount = std::stoi(line.substr(6)); } catch (...) {}
+        }
+        else if (line.rfind("FORMS:", 0) == 0) {
+            try { data.formCount = std::stoi(line.substr(6)); } catch (...) {}
+        }
         else if (line.rfind("HEADING:", 0) == 0)
             data.headings.push_back(line.substr(8));
-        else if (line.rfind("LINK:", 0) == 0)
-            data.foundLinks.push_back(line.substr(5));
+        else if (line.rfind("LINKS:", 0) == 0) {
+            std::string val = line.substr(6);
+            if (!val.empty()) data.linkCount = std::stoi(val);
+        }
     }
     return data;
 }
@@ -91,7 +96,9 @@ static std::string safeRecv(int source, int tag, int myRank) {
     MPI_Recv(buf.data(), n, MPI_CHAR, source, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     buf[n] = '\0';  // belt-and-suspenders null termination
 
-    std::string s(buf.data(), static_cast<size_t>(n) - 1);  // exclude the null Worker B includes
+    size_t len = (n > 0 && buf[n - 1] == '\0') ? static_cast<size_t>(n) - 1 
+                                             : static_cast<size_t>(n);
+    std::string s(buf.data(), len);
     // Trim any trailing null bytes just in case
     while (!s.empty() && s.back() == '\0')
         s.pop_back();
@@ -189,7 +196,9 @@ void runWorkerA(int rank, int N, int M) {
         buf[msgSize] = '\0';
 
         // Build string, excluding any trailing null that the sender included
-        std::string msg(buf.data());
+        std::string msg(buf.data(), static_cast<size_t>(msgSize));
+        // Then strip trailing null if present:
+        while (!msg.empty() && msg.back() == '\0') msg.pop_back();
         DBG(rank, "msg from B rank=" << src << ": '" << msg.substr(0, 60) << (msg.size()>60?"...":"") << "'");
 
         if (msg == "READY") {
