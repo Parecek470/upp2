@@ -11,19 +11,6 @@
 
 #include "master.h"
 
-struct PageData {
-    std::string url;
-    int imageCount = 0;
-    int linkCount = 0;
-    int formCount = 0;
-    std::vector<std::string> headings;
-};
-
-struct CrawlResults {
-    std::string baseUrl;
-    std::map<std::string, PageData> pages;
-    std::vector<std::pair<std::string, std::string>> edges;
-};
 
 CrawlResults parseMasterResult(const std::string& msg) {
     CrawlResults results;

@@ -1,3 +1,3 @@
 #pragma once 
 
-void workerA(int rank, int N, int M);
+void runWorkerA(int rank, int N, int M);

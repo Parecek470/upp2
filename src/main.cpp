@@ -6,12 +6,18 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sstream>
+#include <set>
 #include <mpi.h>
 
 #include "utils.h"
 #include "server.h"
+#include "master.h"
 #include "workerA.h"
 #include "workerB.h"
+
+int g_N = 0;
+int g_M = 0;
 
 void process(const std::vector<std::string>& URLs, std::string& vystup) {
     int rank;
@@ -25,56 +31,56 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
     std::ostringstream outputHtml;
     outputHtml << "<h2>Crawling Results</h2>";
     
-    int N;
-    // Get N from somewhere - we need to pass it or make it global
-    // For now, let's assume we stored it
     
     // Distribute URLs to Worker A nodes (round-robin)
     for (size_t i = 0; i < URLs.size(); i++) {
-        int workerARank = 1 + (i % N);
+        int workerARank = 1 + (i % g_N);
         std::string url = URLs[i];
-        MPI_Send(url.c_str(), url.size() + 1, MPI_CHAR, workerARank, 0, MPI_COMM_WORLD);
-        
+        MPI_Send(url.c_str(), (int)(url.size() + 1), MPI_CHAR, workerARank, 0, MPI_COMM_WORLD);
+
         outputHtml << "<p>Assigned URL: <strong>" << url << "</strong> to Worker A #" << workerARank << "</p>";
     }
     
-    // Receive results from each Worker A
+    std::set<int> assignedWorkers;
     for (size_t i = 0; i < URLs.size(); i++) {
-        // Probe for message size
+        assignedWorkers.insert(1 + (i % g_N));
+    }
+
+    for (size_t i = 0; i < assignedWorkers.size(); i++) {
         MPI_Status status;
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-        
+
         int msgSize;
         MPI_Get_count(&status, MPI_CHAR, &msgSize);
-        
+
         char* resultBuffer = new char[msgSize];
-        MPI_Recv(resultBuffer, msgSize, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        
+        MPI_Recv(resultBuffer, msgSize, MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
         std::string resultMsg(resultBuffer);
         delete[] resultBuffer;
-        
+
         // Parse results
         CrawlResults results = parseMasterResult(resultMsg);
-        
+
         // Create timestamped directory
-        std::string dirName = "results/" + makeDirectoryName(results.baseUrl);
         createDirectory("results");  // Ensure results/ exists
+        std::string dirName = "results/" + makeDirectoryName(results.baseUrl);
         createDirectory(dirName);
-        
+
         // Write output files
         std::string endTime = getCurrentTimestamp();
         writeMapFile(dirName + "/map.txt", results);
         writeContentFile(dirName + "/content.txt", results);
         writeLogFile(dirName + "/log.txt", startTime, endTime, "OK");
-        
-        outputHtml << "<p>✓ Completed crawling: <strong>" << results.baseUrl << "</strong></p>";
+
+        outputHtml << "<p>&#10003; Completed crawling: <strong>" << results.baseUrl << "</strong></p>";
         outputHtml << "<p>Results saved to: <code>" << dirName << "</code></p>";
         outputHtml << "<ul>";
         outputHtml << "<li>Pages found: " << results.pages.size() << "</li>";
         outputHtml << "<li>Links found: " << results.edges.size() << "</li>";
         outputHtml << "</ul>";
     }
-    
+
     outputHtml << "<p><strong>All crawling tasks completed!</strong></p>";
     vystup = outputHtml.str();
 }
@@ -97,8 +103,7 @@ void parseArgs(int argc, char** argv, int& N, int& M) {
     }
 }
 
-int g_N = 0;
-int g_M = 0;
+
 
 int main(int argc, char** argv) {
 	// initialize MPI
@@ -133,9 +138,9 @@ int main(int argc, char** argv) {
 		svr.Run();
 
 	} else if (rank >= 1 && rank <= g_N) {
-		workerA(rank, g_N, g_M);
+		runWorkerA(rank, g_N, g_M);
 	} else {
-		workerB(rank, g_N, g_M);
+		runWorkerB(rank, g_N, g_M);
 	}
 
 	MPI_Finalize();
