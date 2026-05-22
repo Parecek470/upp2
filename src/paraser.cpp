@@ -3,6 +3,9 @@
 #include <sstream>
 
 
+static bool startsWith(const std::string& s, const std::string& prefix) {
+    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
 
 URLParts parseURL(const std::string& url) {
     URLParts parts;
@@ -142,9 +145,8 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
             absUrl = baseScheme + "://" + baseDomain + baseDir + href;
         }
 
-        // Accept links that belong to the same domain regardless of scheme.
         URLParts linkParts = parseURL(absUrl);
-        if (linkParts.domain == baseDomain) {
+        if (linkParts.domain == baseDomain ) {
             std::string cleanUrl = baseScheme + "://" + baseDomain + normalizePath(linkParts.path);
             size_t fragPos = cleanUrl.find('#');
             if (fragPos != std::string::npos)
@@ -168,7 +170,6 @@ static std::string stripTags(const std::string& s) {
         else if (c == '>') inTag = false;
         else if (!inTag)   out += c;
     }
-    // Trim leading/trailing whitespace
     size_t start = out.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
     size_t end = out.find_last_not_of(" \t\r\n");
@@ -180,7 +181,6 @@ std::vector<std::string> extractHeadings(const std::string& html) {
     size_t pos = 0;
 
     while (pos < html.size()) {
-        // Find whichever heading level appears next
         size_t nextPos   = std::string::npos;
         int    foundLevel = 0;
 
