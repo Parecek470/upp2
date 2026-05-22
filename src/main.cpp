@@ -6,22 +6,77 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <mpi.h>
 
 #include "utils.h"
 #include "server.h"
+#include "workerA.h"
+#include "workerB.h"
 
 void process(const std::vector<std::string>& URLs, std::string& vystup) {
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	// tuhle metodu implementujte
-	// v parametru URLs jsou URL adresy, ktere byly odeslany z formulare
+    if(rank != 0) {
+        return;
+    }
 
-	// tohle nahradte vystupem, ktery chcete zobrazit uzivateli (tj. vysledkem zpracovani)
-	vystup = "Zadali jste: <ul>";
-	for (const auto& url : URLs) {
-		vystup += "<li>" + url + "</li>";
-	}
-	vystup += "</ul>";
-
+    std::string startTime = getCurrentTimestamp();
+    std::ostringstream outputHtml;
+    outputHtml << "<h2>Crawling Results</h2>";
+    
+    int N;
+    // Get N from somewhere - we need to pass it or make it global
+    // For now, let's assume we stored it
+    
+    // Distribute URLs to Worker A nodes (round-robin)
+    for (size_t i = 0; i < URLs.size(); i++) {
+        int workerARank = 1 + (i % N);
+        std::string url = URLs[i];
+        MPI_Send(url.c_str(), url.size() + 1, MPI_CHAR, workerARank, 0, MPI_COMM_WORLD);
+        
+        outputHtml << "<p>Assigned URL: <strong>" << url << "</strong> to Worker A #" << workerARank << "</p>";
+    }
+    
+    // Receive results from each Worker A
+    for (size_t i = 0; i < URLs.size(); i++) {
+        // Probe for message size
+        MPI_Status status;
+        MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+        
+        int msgSize;
+        MPI_Get_count(&status, MPI_CHAR, &msgSize);
+        
+        char* resultBuffer = new char[msgSize];
+        MPI_Recv(resultBuffer, msgSize, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        std::string resultMsg(resultBuffer);
+        delete[] resultBuffer;
+        
+        // Parse results
+        CrawlResults results = parseMasterResult(resultMsg);
+        
+        // Create timestamped directory
+        std::string dirName = "results/" + makeDirectoryName(results.baseUrl);
+        createDirectory("results");  // Ensure results/ exists
+        createDirectory(dirName);
+        
+        // Write output files
+        std::string endTime = getCurrentTimestamp();
+        writeMapFile(dirName + "/map.txt", results);
+        writeContentFile(dirName + "/content.txt", results);
+        writeLogFile(dirName + "/log.txt", startTime, endTime, "OK");
+        
+        outputHtml << "<p>✓ Completed crawling: <strong>" << results.baseUrl << "</strong></p>";
+        outputHtml << "<p>Results saved to: <code>" << dirName << "</code></p>";
+        outputHtml << "<ul>";
+        outputHtml << "<li>Pages found: " << results.pages.size() << "</li>";
+        outputHtml << "<li>Links found: " << results.edges.size() << "</li>";
+        outputHtml << "</ul>";
+    }
+    
+    outputHtml << "<p><strong>All crawling tasks completed!</strong></p>";
+    vystup = outputHtml.str();
 }
 
 void parseArgs(int argc, char** argv, int& N, int& M) {
@@ -42,18 +97,47 @@ void parseArgs(int argc, char** argv, int& N, int& M) {
     }
 }
 
-int main(int argc, char** argv) {
+int g_N = 0;
+int g_M = 0;
 
-	// inicializace serveru
-	CServer svr;
-	if (!svr.Init("./data", "0.0.0.0", 8001)) {
-		std::cerr << "Nelze inicializovat server!" << std::endl;
-		return EXIT_FAILURE;
+int main(int argc, char** argv) {
+	// initialize MPI
+	MPI_Init(&argc, &argv);
+	
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+	
+	parseArgs(argc, argv, g_N, g_M);
+
+	int expectedSize = 1 + g_N + g_N * g_M;
+    if (size != expectedSize) {
+        if (rank == 0) {
+            std::cerr << "Error: Expected " << expectedSize << " processes, but got " << size << "\n";
+            std::cerr << "Run with: mpirun -np " << expectedSize << " ./upp2 -n " << g_N << " -m " << g_M << "\n";
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+	if(rank == 0) {
+		// inicializace serveru
+		CServer svr;
+		if (!svr.Init("./data", "0.0.0.0", 8001)) {
+			std::cerr << "Nelze inicializovat server!" << std::endl;
+			MPI_Abort(MPI_COMM_WORLD, 1);
+		}
+
+		// registrace callbacku pro zpracovani odeslanych URL
+		svr.RegisterFormCallback(process);
+
+		svr.Run();
+
+	} else if (rank >= 1 && rank <= g_N) {
+		workerA(rank, g_N, g_M);
+	} else {
+		workerB(rank, g_N, g_M);
 	}
 
-	// registrace callbacku pro zpracovani odeslanych URL
-	svr.RegisterFormCallback(process);
-
-	// spusteni serveru
-	return svr.Run() ? EXIT_SUCCESS : EXIT_FAILURE;
+	MPI_Finalize();
+	return 0;
 }

@@ -5,6 +5,10 @@ PROJECT(UPP_SP2)
 # pouzivame standard C++23 - pokud jej vas kompilator nepodporuje, zmente nejhure na 17 (C++17)
 SET(CMAKE_CXX_STANDARD 23)
 
+# MPI knihovna
+FIND_PACKAGE(MPI REQUIRED)
+INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
+
 # najdeme vsechny soubory v podadresari src
 FILE(GLOB_RECURSE src src/*.cpp src/*.h)
 
@@ -22,6 +26,9 @@ ENDIF()
 INCLUDE_DIRECTORIES("dep/cpp-httplib")
 
 ADD_EXECUTABLE(UPP-SP2 ${src})
+
+# linkujeme MPI knihovnu
+TARGET_LINK_LIBRARIES(UPP-SP2 ${MPI_CXX_LIBRARIES})
 
 # pokud chceme pouzivat SSL, musime prilinkovat OpenSSL
 IF(USE_SSL)
