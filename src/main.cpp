@@ -2,7 +2,6 @@
  * Kostra druhe semestralni prace z predmetu KIV/UPP
  * Soubory a hlavicku upravujte dle sveho uvazeni a nutnosti
  */
-
 #include <string>
 #include <vector>
 #include <iostream>
@@ -47,17 +46,19 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
     }
 
     for (size_t i = 0; i < assignedWorkers.size(); i++) {
+        // FIX: probe first to get exact size, use vector<char> with guaranteed null,
+        //      never construct std::string from a raw unguarded char*.
         MPI_Status status;
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
 
-        int msgSize;
+        int msgSize = 0;
         MPI_Get_count(&status, MPI_CHAR, &msgSize);
+        if (msgSize <= 0) { i--; continue; }  // defensive skip
 
-        char* resultBuffer = new char[msgSize];
-        MPI_Recv(resultBuffer, msgSize, MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        std::vector<char> resultBuffer(msgSize + 1, '\0');
+        MPI_Recv(resultBuffer.data(), msgSize, MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        std::string resultMsg(resultBuffer);
-        delete[] resultBuffer;
+        std::string resultMsg(resultBuffer.data());
 
         // Parse results
         CrawlResults results = parseMasterResult(resultMsg);

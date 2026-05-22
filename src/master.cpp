@@ -11,16 +11,15 @@
 
 #include "master.h"
 
-
 CrawlResults parseMasterResult(const std::string& msg) {
     CrawlResults results;
     std::istringstream stream(msg);
     std::string line;
-    
+
     PageData currentPage;
     bool inPages = false;
     bool inGraph = false;
-    
+
     while (std::getline(stream, line)) {
         if (line.rfind("BASE_URL|", 0) == 0) {
             results.baseUrl = line.substr(9);
@@ -28,6 +27,11 @@ CrawlResults parseMasterResult(const std::string& msg) {
             inPages = true;
             inGraph = false;
         } else if (line == "END_PAGES") {
+            // FIX: flush the last page if END_PAGE was missing
+            if (!currentPage.url.empty()) {
+                results.pages[currentPage.url] = currentPage;
+                currentPage = PageData();
+            }
             inPages = false;
         } else if (line == "BEGIN_GRAPH") {
             inGraph = true;
@@ -36,11 +40,8 @@ CrawlResults parseMasterResult(const std::string& msg) {
             inGraph = false;
         } else if (inPages) {
             if (line.rfind("PAGE|", 0) == 0) {
-                // Save previous page if exists
-                if (!currentPage.url.empty()) {
+                if (!currentPage.url.empty())
                     results.pages[currentPage.url] = currentPage;
-                }
-                // Start new page
                 currentPage = PageData();
                 currentPage.url = line.substr(5);
             } else if (line.rfind("IMAGES|", 0) == 0) {
@@ -52,7 +53,6 @@ CrawlResults parseMasterResult(const std::string& msg) {
             } else if (line.rfind("HEADING|", 0) == 0) {
                 currentPage.headings.push_back(line.substr(8));
             } else if (line == "END_PAGE") {
-                // Save current page
                 if (!currentPage.url.empty()) {
                     results.pages[currentPage.url] = currentPage;
                     currentPage = PageData();
@@ -60,7 +60,6 @@ CrawlResults parseMasterResult(const std::string& msg) {
             }
         } else if (inGraph) {
             if (line.rfind("EDGE|", 0) == 0) {
-                // Format: EDGE|source|target
                 size_t firstPipe = 5;
                 size_t secondPipe = line.find('|', firstPipe);
                 if (secondPipe != std::string::npos) {
@@ -71,7 +70,7 @@ CrawlResults parseMasterResult(const std::string& msg) {
             }
         }
     }
-    
+
     return results;
 }
 
@@ -87,17 +86,22 @@ std::string makeDirectoryName(const std::string& baseUrl) {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
     std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y_%m_%d_%H_%M_");
-    
-    // Make safe name from URL
+    // FIX: compact format matching the spec: YYYYMMDDHHmm + safe URL name
+    oss << std::put_time(&tm, "%Y%m%d%H%M");
+
     std::string safe = baseUrl;
-    for (char& c : safe) {
-        if (!std::isalnum(c) && c != '-') {
-            c = '_';
-        }
+    // Strip scheme (http:// or https://)
+    auto schemeEnd = safe.find("://");
+    if (schemeEnd != std::string::npos)
+        safe = safe.substr(schemeEnd + 3);
+    // Replace non-alphanumeric (except '-') with nothing (spec: "bezpecna forma")
+    std::string cleaned;
+    for (char c : safe) {
+        if (std::isalnum(c) || c == '-')
+            cleaned += c;
+        // drop everything else (dots, slashes, colons)
     }
-    oss << safe;
-    
+    oss << cleaned;
     return oss.str();
 }
 
@@ -107,43 +111,39 @@ void createDirectory(const std::string& path) {
 
 void writeMapFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
-    
-    // Section 1: List all unique page URLs (nodes)
-    for (const auto& [url, data] : results.pages) {
-        file << "\"" << url << "\"\n";
-    }
-    
-    // Section 2: List all edges
-    for (const auto& [source, target] : results.edges) {
-        file << "\"" << source << "\" \"" << target << "\"\n";
-    }
-    
+
+    // Section 1: one node (URI path) per line — no quotes per spec example
+    for (const auto& [url, data] : results.pages)
+        file << url << "\n";
+
+    // Section 2: edge pairs — no quotes per spec example
+    for (const auto& [source, target] : results.edges)
+        file << source << " " << target << "\n";
+
     file.close();
 }
 
 void writeContentFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
-    
+
     for (const auto& [url, data] : results.pages) {
-        file << "\"" << url << "\"\n";
+        file << url << "\n";                              // no quotes per spec
         file << "IMAGES " << data.imageCount << "\n";
-        file << "LINKS " << data.linkCount << "\n";
-        file << "FORMS " << data.formCount << "\n";
-        
-        for (const auto& heading : data.headings) {
-            file << heading << "\n";  // Already has dashes
-        }
-        file << "\n";  // Blank line between pages
+        file << "LINKS "  << data.linkCount  << "\n";
+        file << "FORMS "  << data.formCount  << "\n";
+        for (const auto& heading : data.headings)
+            file << heading << "\n";                      // already has dash prefix
+        file << "\n";
     }
-    
+
     file.close();
 }
 
-void writeLogFile(const std::string& filepath, const std::string& startTime, 
+void writeLogFile(const std::string& filepath, const std::string& startTime,
                   const std::string& endTime, const std::string& status) {
     std::ofstream file(filepath);
     file << startTime << "\n";
-    file << endTime << "\n";
-    file << status << "\n";
+    file << endTime   << "\n";
+    file << status    << "\n";
     file.close();
 }

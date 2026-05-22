@@ -8,52 +8,67 @@
 #include "workerB.h"
 #include "utils.h"
 
-int calculateParentWorkerA(int myRank, int N, int M) {
-    int workerBIndex = myRank - (N + 1);  
-    int parentWorkerA = 1 + (workerBIndex / M); 
+static int calculateParentWorkerA(int myRank, int N, int M) {
+    int workerBIndex = myRank - (N + 1);
+    int parentWorkerA = 1 + (workerBIndex / M);
     return parentWorkerA;
 }
 
 void runWorkerB(int rank, int N, int M) {
-    // Calculate which Worker A is my parent
     int workerAId = calculateParentWorkerA(rank, N, M);
-    
+
     while (true) {
-        // Request work from Worker A
+        // Tell Worker A we are ready for work
         MPI_Send("READY", 6, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
-        
-        // Receive URL from Worker A
-        char urlBuffer[1024];
+
+        // -------------------------------------------------------------------
+        // Receive URL (or DONE) from Worker A.
+        // FIX: use Probe+Get_count so the buffer is exactly the right size,
+        //      then explicitly null-terminate before constructing std::string.
+        //      The old code used a fixed 1024-byte stack buffer with no null
+        //      termination guarantee → stack corruption → segfault.
+        // -------------------------------------------------------------------
         MPI_Status status;
-        MPI_Recv(urlBuffer, 1024, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD, &status);
-        
-        std::string url(urlBuffer);
-        if (url == "DONE") break; // Signal to stop
-        
-        // Download HTML
+        MPI_Probe(workerAId, 0, MPI_COMM_WORLD, &status);
+
+        int msgSize = 0;
+        MPI_Get_count(&status, MPI_CHAR, &msgSize);
+
+        if (msgSize <= 0) continue;  // should never happen, but be safe
+
+        std::vector<char> urlBuf(msgSize + 1, '\0');   // +1 for guaranteed '\0'
+        MPI_Recv(urlBuf.data(), msgSize, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        std::string url(urlBuf.data());
+
+        if (url == "DONE") break;
+
+        // Download and parse the page
         std::string html = utils::downloadHTML(url);
-        
-        // Parse and count
-        int imgCount = countTag(html, "<img ");
+
+        int imgCount  = countTag(html, "<img ");
         int formCount = countTag(html, "<form ");
-        std::vector<std::string> links = extractLinks(html, url);
+        std::vector<std::string> links    = extractLinks(html, url);
         std::vector<std::string> headings = extractHeadings(html);
-        
-        // Serialize to string
-        std::string result = "URL:" + url + "\n";
-        result += "IMAGES:" + std::to_string(imgCount) + "\n";
-        result += "LINKS:" + std::to_string(links.size()) + "\n";
-        result += "FORMS:" + std::to_string(formCount) + "\n";
-        
-        for (const auto& link : links) {
+
+        // Serialize result
+        std::string result;
+        result += "URL:"    + url + "\n";
+        result += "IMAGES:" + std::to_string(imgCount)      + "\n";
+        result += "LINKS:"  + std::to_string(links.size())  + "\n";
+        result += "FORMS:"  + std::to_string(formCount)     + "\n";
+
+        for (const auto& link : links)
             result += "LINK:" + link + "\n";
-        }
-        
-        for (const auto& heading : headings) {
+
+        for (const auto& heading : headings)
             result += "HEADING:" + heading + "\n";
-        }
-        
-        // Send back to Worker A
-        MPI_Send(result.c_str(), result.size() + 1, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
+
+        // -------------------------------------------------------------------
+        // FIX: cast size to int explicitly; result.size()+1 is safe here
+        //      because result is never large enough to overflow int in practice.
+        // -------------------------------------------------------------------
+        int sendLen = static_cast<int>(result.size()) + 1;
+        MPI_Send(result.c_str(), sendLen, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
     }
 }
