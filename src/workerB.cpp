@@ -38,14 +38,6 @@ void runWorkerB_job(int rank, int N, int M) {
     while (true) {
         // Tell Worker A we are ready for work
         MPI_Send("READY", 6, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
-
-        // -------------------------------------------------------------------
-        // Receive URL (or DONE) from Worker A.
-        // FIX: use Probe+Get_count so the buffer is exactly the right size,
-        //      then explicitly null-terminate before constructing std::string.
-        //      The old code used a fixed 1024-byte stack buffer with no null
-        //      termination guarantee → stack corruption → segfault.
-        // -------------------------------------------------------------------
         MPI_Status status;
         MPI_Probe(workerAId, 0, MPI_COMM_WORLD, &status);
 
@@ -54,7 +46,7 @@ void runWorkerB_job(int rank, int N, int M) {
 
         if (msgSize <= 0) continue;  // should never happen, but be safe
 
-        std::vector<char> urlBuf(msgSize + 1, '\0');   // +1 for guaranteed '\0'
+        std::vector<char> urlBuf(msgSize + 1, '\0'); 
         MPI_Recv(urlBuf.data(), msgSize, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         std::string url(urlBuf.data(), static_cast<size_t>(msgSize) - 1);
@@ -66,8 +58,8 @@ void runWorkerB_job(int rank, int N, int M) {
 
         int imgCount  = countTag(html, "<img ");
         int formCount = countTag(html, "<form ");
-        int linkCount = countTag(html, "<a ");   // total <a> tags, regardless of domain
-        std::vector<std::string> links    = extractLinks(html, url);  // domain-filtered, for graph
+        int linkCount = countTag(html, "<a ");   
+        std::vector<std::string> links    = extractLinks(html, url);  
         std::vector<std::string> headings = extractHeadings(html);
 
         // Serialize result
@@ -83,10 +75,6 @@ void runWorkerB_job(int rank, int N, int M) {
         for (const auto& heading : headings)
             result += "HEADING:" + heading + "\n";
 
-        // -------------------------------------------------------------------
-        // FIX: cast size to int explicitly; result.size()+1 is safe here
-        //      because result is never large enough to overflow int in practice.
-        // -------------------------------------------------------------------
         int sendLen = static_cast<int>(result.size()) + 1;
         MPI_Send(result.c_str(), sendLen, MPI_CHAR, workerAId, 0, MPI_COMM_WORLD);
     }

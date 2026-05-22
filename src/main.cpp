@@ -53,14 +53,12 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
     }
 
     for (size_t i = 0; i < assignedWorkers.size(); i++) {
-        // FIX: probe first to get exact size, use vector<char> with guaranteed null,
-        //      never construct std::string from a raw unguarded char*.
         MPI_Status status;
-        MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+        MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status); 
 
         int msgSize = 0;
         MPI_Get_count(&status, MPI_CHAR, &msgSize);
-        if (msgSize <= 0) { i--; continue; }  // defensive skip
+        if (msgSize <= 0) { i--; continue; }  
 
         std::vector<char> resultBuffer(msgSize + 1, '\0');
         MPI_Recv(resultBuffer.data(), msgSize, MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -71,7 +69,7 @@ void process(const std::vector<std::string>& URLs, std::string& vystup) {
         CrawlResults results = parseMasterResult(resultMsg);
 
         // Create timestamped directory
-        createDirectory("results");  // Ensure results/ exists
+        createDirectory("results");  
         std::string dirName = "results/" + makeDirectoryName(results.baseUrl);
         createDirectory(dirName);
 
@@ -145,7 +143,7 @@ int main(int argc, char** argv) {
 
 		svr.Run();
 
-		// Server stopped — tell all workers to shut down (tag 1 = control channel)
+		// shutdown all workers on server stop (tag 1 = control channel)
 		for (int w = 1; w < 1 + g_N + g_N * g_M; w++)
 			MPI_Send("SHUTDOWN", 9, MPI_CHAR, w, 1, MPI_COMM_WORLD);
 

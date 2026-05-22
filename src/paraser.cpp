@@ -12,40 +12,30 @@ URLParts parseURL(const std::string& url) {
     // Find "://" and extract scheme
     size_t schemeEnd = url.find("://");
     if (schemeEnd == std::string::npos)
-        return parts; // malformed URL
+        return parts;
 
     parts.scheme = url.substr(0, schemeEnd);
-
-    // Start of domain is right after "://"
     size_t domainStart = schemeEnd + 3;
-
-    // Extract domain until first '/' after the authority
     size_t pathStart = url.find('/', domainStart);
 
     if (pathStart == std::string::npos) {
-        // No path found — domain is the rest of the string
         parts.domain = url.substr(domainStart);
         parts.path = "/";
     } else {
         parts.domain = url.substr(domainStart, pathStart - domainStart);
-        parts.path = url.substr(pathStart); // includes the leading '/'
+        parts.path = url.substr(pathStart); 
     }
 
     return parts;
 }
 
 // Normalize a URL path by resolving . and .. segments.
-// e.g. "/projekty/../o-nas.html" -> "/o-nas.html"
-//      "/a/b/./c/../d.html"      -> "/a/b/d.html"
 static std::string normalizePath(const std::string& path) {
-    // Split on '/'
     std::vector<std::string> segments;
     std::istringstream ss(path);
     std::string seg;
     bool leadingSlash = (!path.empty() && path[0] == '/');
 
-    // We need istringstream from <sstream> — it is already included via parser.h transitively,
-    // but include guard is in the .cpp; use manual split instead to be safe.
     size_t start = 0;
     while (start < path.size()) {
         size_t slash = path.find('/', start);
@@ -56,7 +46,7 @@ static std::string normalizePath(const std::string& path) {
         if (slash > start)
             segments.push_back(path.substr(start, slash - start));
         else
-            segments.push_back(""); // leading or consecutive slash
+            segments.push_back(""); 
         start = slash + 1;
     }
 
@@ -83,14 +73,14 @@ static std::string normalizePath(const std::string& path) {
     return result;
 }
 
+//counts occurrences of a substring in a string
 int countTag(const std::string& html, const std::string& tag) {
     int count = 0;
     size_t pos = 0;
 
-    // Loop through html, finding each occurrence of tag
     while ((pos = html.find(tag, pos)) != std::string::npos) {
         count++;
-        pos += tag.length(); // Move past the last found tag
+        pos += tag.length(); 
     }
 
     return count;
@@ -100,27 +90,20 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
     std::vector<std::string> links;
     size_t pos = 0;
 
-    // Parse the base URL once to get scheme + domain for relative-URL resolution
-    // and for domain-matching against discovered links.
     URLParts baseParts = parseURL(baseUrl);
-    // Canonical base prefix used for domain-matching: scheme://domain
-    // We compare against both http and https variants of the same domain so a
-    // page downloaded via https but submitted as http still matches.
     std::string baseScheme = baseParts.scheme;          // "http" or "https"
-    std::string baseDomain = baseParts.domain;          // e.g. "upp-test-2.martinubl.cz"
+    std::string baseDomain = baseParts.domain;          
 
     while ((pos = html.find("<a ", pos)) != std::string::npos) {
         size_t closingTag = html.find('>', pos);
         if (closingTag == std::string::npos) break;
 
-        // Find "href" attribute within this tag
         size_t hrefPos = html.find("href", pos);
         if (hrefPos == std::string::npos || hrefPos >= closingTag) {
             pos += 3;
             continue;
         }
 
-        // Step over "href" and optional whitespace, then '=', then opening quote
         size_t eq = html.find('=', hrefPos);
         if (eq == std::string::npos || eq >= closingTag) {
             pos += 3;
@@ -152,11 +135,8 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
         if (href.find("://") != std::string::npos) {
             absUrl = href;
         } else if (!href.empty() && href[0] == '/') {
-            // Root-relative: use same scheme and domain as base
             absUrl = baseScheme + "://" + baseDomain + href;
         } else {
-            // Relative path: resolve against base URL's directory
-            // e.g. base="http://example.com/foo/bar", href="baz.html" -> "http://example.com/foo/baz.html"
             std::string basePath = baseParts.path;
             size_t lastSlash = basePath.rfind('/');
             std::string baseDir = (lastSlash != std::string::npos) ? basePath.substr(0, lastSlash + 1) : "/";
@@ -164,11 +144,8 @@ std::vector<std::string> extractLinks(const std::string& html, const std::string
         }
 
         // Accept links that belong to the same domain regardless of scheme.
-        // Normalize to baseScheme so all URLs in the graph are consistent
-        // (avoids scheme mismatch in visitedUrls, toRelativePath, and downloadHTML).
         URLParts linkParts = parseURL(absUrl);
         if (linkParts.domain == baseDomain) {
-            // Resolve any . and .. segments so URLs are canonical before dedup/queueing
             std::string cleanUrl = baseScheme + "://" + baseDomain + normalizePath(linkParts.path);
             size_t fragPos = cleanUrl.find('#');
             if (fragPos != std::string::npos)
@@ -209,11 +186,9 @@ std::vector<std::string> extractHeadings(const std::string& html) {
         int    foundLevel = 0;
 
         for (int level = 1; level <= 6; ++level) {
-            // Match <h1> or <h1 ...> — i.e. '<h' + digit followed by '>' or ' '
             std::string prefix = "<h" + std::to_string(level);
             size_t found = html.find(prefix, pos);
             while (found != std::string::npos) {
-                // Make sure the character right after 'h<digit>' is '>' or whitespace
                 size_t after = found + prefix.size();
                 if (after < html.size() && (html[after] == '>' || html[after] == ' ' || html[after] == '\t' || html[after] == '\n' || html[after] == '\r')) {
                     if (nextPos == std::string::npos || found < nextPos) {
@@ -222,7 +197,6 @@ std::vector<std::string> extractHeadings(const std::string& html) {
                     }
                     break;
                 }
-                // Could be e.g. <h10> — keep searching
                 found = html.find(prefix, found + 1);
             }
         }

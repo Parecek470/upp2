@@ -11,6 +11,7 @@
 
 #include "master.h"
 
+// Parses the result message from a Worker A and constructs a CrawlResults object.
 CrawlResults parseMasterResult(const std::string& msg) {
     CrawlResults results;
     std::istringstream stream(msg);
@@ -27,7 +28,6 @@ CrawlResults parseMasterResult(const std::string& msg) {
             inPages = true;
             inGraph = false;
         } else if (line == "END_PAGES") {
-            // FIX: flush the last page if END_PAGE was missing
             if (!currentPage.url.empty()) {
                 results.pages[currentPage.url] = currentPage;
                 currentPage = PageData();
@@ -74,6 +74,7 @@ CrawlResults parseMasterResult(const std::string& msg) {
     return results;
 }
 
+// Returns the current timestamp as a string in "YYYY-MM-DD HH:MM:SS" format.
 std::string getCurrentTimestamp() {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
@@ -82,22 +83,21 @@ std::string getCurrentTimestamp() {
     return oss.str();
 }
 
+// Generates a directory name based on the current timestamp and the base URL.
 std::string makeDirectoryName(const std::string& baseUrl) {
     auto now = std::time(nullptr);
     auto tm = *std::localtime(&now);
     std::ostringstream oss;
-    // Format: YYYY_MM_DD_HH_MM_ then safe URL name
     oss << std::put_time(&tm, "%Y_%m_%d_%H_%M_");
 
     std::string safe = baseUrl;
-    // Strip scheme (http:// or https://)
     auto schemeEnd = safe.find("://");
     if (schemeEnd != std::string::npos)
         safe = safe.substr(schemeEnd + 3);
-    // Strip trailing slash
-    if (!safe.empty() && safe.back() == '/')
+    
+        if (!safe.empty() && safe.back() == '/')
         safe.pop_back();
-    // Replace dots, slashes, colons and any other non-alphanumeric (except '-') with '_'
+
     std::string cleaned;
     for (char c : safe) {
         if (std::isalnum(c) || c == '-')
@@ -114,8 +114,6 @@ void createDirectory(const std::string& path) {
 }
 
 // Returns the URI path portion of a URL relative to baseUrl.
-// e.g. baseUrl="http://upp-test-1.martinubl.cz", url="http://upp-test-1.martinubl.cz/galerie" -> "/galerie"
-// If url equals baseUrl (with or without trailing slash) the path is "/".
 static std::string toRelativePath(const std::string& url, const std::string& baseUrl) {
     // Strip trailing slash and whitespace/\r from baseUrl for consistent prefix matching
     std::string base = baseUrl;
@@ -128,19 +126,16 @@ static std::string toRelativePath(const std::string& url, const std::string& bas
     if (url.size() > base.size() && url.substr(0, base.size()) == base)
         return url.substr(base.size());
 
-    // Fallback: return the url as-is
     return url;
 }
 
 void writeMapFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
     const std::string& base = results.baseUrl;
-
-    // Section 1: one node (URI path) per line, quoted
+    //nodes
     for (const auto& [url, data] : results.pages)
         file << '"' << toRelativePath(url, base) << '"' << "\n";
-
-    // Section 2: edge pairs, quoted — skip self-loops
+    //edges
     for (const auto& [source, target] : results.edges) {
         if (source == target) continue;
         file << '"' << toRelativePath(source, base) << '"'
@@ -152,23 +147,25 @@ void writeMapFile(const std::string& filepath, const CrawlResults& results) {
     file.close();
 }
 
+// contents.txt writer
 void writeContentFile(const std::string& filepath, const CrawlResults& results) {
     std::ofstream file(filepath);
     const std::string& base = results.baseUrl;
 
     for (const auto& [url, data] : results.pages) {
-        file << '"' << toRelativePath(url, base) << '"' << "\n";  // quoted relative path
+        file << '"' << toRelativePath(url, base) << '"' << "\n";  
         file << "IMAGES " << data.imageCount << "\n";
         file << "LINKS "  << data.linkCount  << "\n";
         file << "FORMS "  << data.formCount  << "\n";
         for (const auto& heading : data.headings)
-            file << heading << "\n";  // already has dash prefix
+            file << heading << "\n";  
         file << "\n";
     }
 
     file.close();
 }
 
+//writes log file
 void writeLogFile(const std::string& filepath, const std::string& startTime,
                   const std::string& endTime, const std::string& status) {
     std::ofstream file(filepath);
